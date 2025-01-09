@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Text.Json;
@@ -31,34 +32,34 @@ app.Run();
 
 public class SummaryController : ControllerBase
 {
-    private static readonly HttpClient client = new HttpClient();
+    private static readonly HttpClient client = new HttpClient
+    {
+        Timeout = TimeSpan.FromMinutes(10) // 增加超時時間到 10 分鐘
+    };
+
+    // 模型 API 的路徑
     private const string API_ENDPOINT = "http://localhost:11434/api/generate";
 
     [HttpPost("generate-summary")]
     public async Task<IActionResult> GenerateSummary([FromBody] SummaryRequest request)
     {
-        // 日誌記錄接收到的數據
         Console.WriteLine($"接收到的 module: {request.Module}");
         Console.WriteLine($"接收到的 content: {request.Content}");
 
-        // 驗證輸入數據是否為空
         if (string.IsNullOrEmpty(request.Module) || string.IsNullOrEmpty(request.Content))
         {
-            return BadRequest("請提供有效的 module 和 content。");
+            return BadRequest(new { error = "Invalid input", message = "請提供有效的 module 和 content。" });
         }
 
-        // 計時並處理請求
         Stopwatch stopwatch = Stopwatch.StartNew();
         string summary = await GenerateTextAsync(request.Content, request.Module);
         stopwatch.Stop();
 
-        // 如果模型生成失敗
         if (summary == null)
         {
             return StatusCode(500, "模型生成失敗。");
         }
 
-        // 返回結果
         return Ok(new
         {
             module = request.Module,
@@ -71,12 +72,16 @@ public class SummaryController : ControllerBase
     {
         try
         {
-            var requestBody = new { model, prompt };
+            // 在這裡加入提示字
+            string fullPrompt = $"摘要以下文句內容:\n{prompt}";
+
+            var requestBody = new { model, prompt = fullPrompt };
             var json = JsonSerializer.Serialize(requestBody);
             Console.WriteLine($"發送給模型的請求：{json}");
 
             var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
+            // 發送請求到模型 API
             using (var response = await client.PostAsync(API_ENDPOINT, content))
             {
                 if (!response.IsSuccessStatusCode)
@@ -86,7 +91,6 @@ public class SummaryController : ControllerBase
                     return null;
                 }
 
-                // 合併逐行 JSON 的 response 字段
                 string fullResponse = "";
                 using (var reader = new StreamReader(await response.Content.ReadAsStreamAsync()))
                 {
@@ -135,4 +139,3 @@ public class SummaryRequest
     public string Module { get; set; } // 模型名稱
     public string Content { get; set; } // HTML 或純文字內容
 }
-
